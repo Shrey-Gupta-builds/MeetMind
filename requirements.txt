@@ -1,10 +1,14 @@
 # ── AI Meeting Assistant ── requirements.txt ──────────────────────────────────
-# Python >= 3.10 recommended
+# Python >= 3.13 on Render (set via PYTHON_VERSION env var in Render dashboard)
 
 # ── Audio / Video acquisition ─────────────────────────────────────────────────
 yt-dlp>=2024.4.9                  # Download audio from YouTube URLs
+# audioop-lts MUST be listed before pydub so it is installed first.
+# pydub/utils.py does: try: import audioop / except ImportError: import pyaudioop
+# audioop-lts installs the module as "audioop", satisfying the try-block on Python 3.13+.
+# Version 0.2.2 ships cp313-abi3 manylinux wheels that cover Python 3.13 AND 3.14.
+audioop-lts>=0.2.2; python_version>='3.13'  # Restores removed audioop for pydub on Python 3.13+
 pydub>=0.25.1                     # Audio file manipulation / format conversion
-audioop-lts>=0.2.1                # Backport of audioop (removed in Python 3.13 via PEP 594); required by pydub on Python 3.13+
 ffmpeg-python>=0.2.0              # FFmpeg bindings (FFmpeg binary must be installed separately)
 
 # ── Speech-to-Text (local Whisper) ────────────────────────────────────────────
