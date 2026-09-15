@@ -1,0 +1,109 @@
+================================================================================
+INTERVIEW PREPARATION: 03_SUMMARIZER.PY
+Component: Map-Reduce Summarization & Title Generation
+Role in Pipeline: Uses LangChain LCEL & Mistral AI to synthesize executive
+                  summaries
+================================================================================
+
+QUESTION 1: LLM PATTERNS & CONTEXT LIMITS
+Q: "What is Map-Reduce summarization and why use it instead of passing the
+   entire transcript to Mistral?"
+
+Interviewer is testing: Advanced prompt engineering patterns, token limits, and
+   LLM attention behavior.
+
+IDEAL ANSWER:
+"Map-Reduce is a distributed summarization pattern designed to handle long-form
+documents:
+1. Map Step: The transcript is split into 3,000-character chunks. Each chunk is
+   sent to the LLM independently with a prompt: 'Summarize this portion
+   concisely.'
+2. Reduce (Combine) Step: All individual chunk summaries are concatenated and
+   sent to a final synthesis prompt: 'Combine these partial summaries into one
+   final professional meeting summary in bullet points.'
+Why not stuff the whole transcript into a single prompt?
+- Context Window Limits: Very long meetings (1-2 hours) can exceed model
+  context limits.
+- The 'Lost in the Middle' Phenomenon: Research proves that LLMs retrieve
+  information best at the very beginning and very end of their context window.
+  Stuffing 20,000 tokens causes the LLM to ignore crucial decisions buried in
+  the middle. Map-Reduce guarantees equal attention to all sections."
+
+
+--------------------------------------------------------------------------------
+QUESTION 2: LANGCHAIN LCEL (LANGCHAIN EXPRESSION LANGUAGE)
+Q: "How does the pipeline syntax `prompt | llm | StrOutputParser()` work in
+   LangChain LCEL?"
+
+Interviewer is testing: Your modern LangChain knowledge (LCEL vs legacy
+   deprecated LLMChain).
+
+IDEAL ANSWER:
+"LCEL relies on the `Runnable` protocol, inspired by Unix pipe syntax (`|`):
+1. Every component in LCEL implements the `Runnable` interface (providing
+   `.invoke()`, `.batch()`, `.stream()`, and `.ainvoke()`).
+2. When chaining `prompt | llm | StrOutputParser()`:
+   - The dictionary input is passed into `ChatPromptTemplate`, which formats
+     prompt messages (`PromptValue`).
+   - `PromptValue` is piped directly into the `ChatMistralAI` model, which
+     generates a `ChatResult` (AIMessage).
+   - `StrOutputParser` extracts the pure text string from the AIMessage.
+3. Benefits: LCEL natively supports asynchronous execution, parallel batching,
+   streaming, and easy integration with observability tools (LangSmith)."
+
+
+--------------------------------------------------------------------------------
+QUESTION 3: TEXT CHUNKING STRATEGY
+Q: "Why did you choose `RecursiveCharacterTextSplitter` with chunk_size=3000 and
+   overlap=200 here, but chunk_size=500 in vector_store.py?"
+
+Interviewer is testing: Difference between summarization chunking vs RAG
+   retrieval chunking.
+
+IDEAL ANSWER:
+"Summarization and RAG have fundamentally different context requirements:
+- For Summarization (chunk_size=3000): We want high semantic breadth. The LLM
+  needs enough surrounding conversation (~600-750 words) to understand
+  context, who is speaking, and the flow of discussion. Overlap of 200
+  characters prevents concepts from being cleanly sliced at arbitrary character
+  counts.
+- For RAG Retrieval (chunk_size=500): We want high semantic precision. If a
+  chunk is 3,000 characters, the embedding vector gets diluted across many
+  disparate topics. A tight 500-character chunk (~100 words) creates a dense
+  vector embedding that matches specific user questions with high similarity
+  scores."
+
+
+--------------------------------------------------------------------------------
+QUESTION 4: MODEL SELECTION & PARAMETERS
+Q: "Why did you pick Mistral (`mistral-small-latest`) with temperature=0.3?"
+
+Interviewer is testing: Model selection criteria, pricing, and hyperparameter
+   tuning.
+
+IDEAL ANSWER:
+"1. Model Selection: Mistral offers top-tier reasoning capabilities at a
+   fraction of the latency and API cost of GPT-4. `mistral-small-latest` is
+   optimized for low-latency reasoning and structured output.
+2. Temperature = 0.3: Temperature controls the randomness/creativity of token
+   sampling. For creative storytelling, you use 0.7-1.0. For meeting
+   summarization, we want high factual consistency and low hallucination, so
+   temperature is kept low (0.3), but slightly above 0.0 to maintain natural,
+   varied prose."
+
+
+--------------------------------------------------------------------------------
+QUESTION 5: TITLE GENERATION
+Q: "In `generate_title()`, you passed `transcript[:2000]`. Why not the full
+   transcript?"
+
+Interviewer is testing: Efficiency, token cost, and domain understanding of
+   human meetings.
+
+IDEAL ANSWER:
+"In almost all formal and informal meetings, the agenda, purpose, and topic
+introduction are discussed in the first 2-5 minutes.
+Passing `transcript[:2000]` (~400 words) provides complete context of the
+meeting's purpose while consuming negligible tokens and returning the title in
+under 1 second."
+================================================================================

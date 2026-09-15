@@ -1,0 +1,107 @@
+================================================================================
+INTERVIEW PREPARATION: 01_AUDIO_PROCESSOR.PY
+Component: Audio Ingestion, Formatting & Chunking
+Role in Pipeline: Takes YouTube URL or local file, outputs 10-min 16kHz mono
+                  WAV chunks
+================================================================================
+
+QUESTION 1: FUNDAMENTALS & SIGNAL PROCESSING
+Q: "Why do you convert audio to 16,000 Hz (16kHz) Mono WAV? Why not pass the
+   original MP3/MP4 directly?"
+
+Interviewer is testing: Your knowledge of speech model architecture and audio
+   preprocessing standards.
+
+IDEAL ANSWER:
+"Speech-to-Text models like Whisper are pre-trained on log-mel spectrograms
+extracted from 16kHz, single-channel (mono) audio.
+1. Multi-channel audio (stereo): Having left and right channels doubles the
+   data payload without providing extra speech information. Downmixing to mono
+   halves the audio memory footprint.
+2. Sample Rate (16kHz): Human speech frequencies relevant to transcription lie
+   mostly below 8kHz (Nyquist theorem requires double the frequency, hence
+   16kHz). Higher sample rates like 44.1kHz (music CD standard) waste CPU/GPU
+   memory and force the STT model to resample internally during feature
+   extraction.
+3. WAV Format: Uncompressed linear PCM (WAV) eliminates lossy decoding overhead
+   during inference."
+
+
+--------------------------------------------------------------------------------
+QUESTION 2: SYSTEM DESIGN & MEMORY MANAGEMENT
+Q: "Why do you chunk audio into 10-minute segments instead of processing a
+   1-hour recording in one go?"
+
+Interviewer is testing: Memory (RAM/VRAM) management and model degradation edge
+   cases.
+
+IDEAL ANSWER:
+"Passing long, uninterrupted audio directly to neural networks introduces two
+major risks:
+1. Out-Of-Memory (OOM) Crashes: Loading huge audio tensors into PyTorch exhausts
+   RAM and GPU VRAM on standard infrastructure.
+2. Attention Drift & Hallucination: Whisper operates internally with a 30-second
+   attention window. On long continuous audio files, positional embeddings can
+   drift, causing Whisper to get trapped in repetitive loops (repeating the
+   same sentence indefinitely).
+Slicing into 10-minute segments isolates failure domains, ensures predictable
+memory consumption, and enables parallel processing across worker threads if
+scaling."
+
+ 
+--------------------------------------------------------------------------------
+QUESTION 3: CRITICAL THINKING & EDGE CASES
+Q: "If you arbitrarily cut audio every 10 minutes, won't you cut words or
+   sentences in half? How do you solve that?"
+
+Interviewer is testing: Edge case identification and familiarity with
+   production speech tools.
+
+IDEAL ANSWER:
+"Yes, fixed-time chunking can split a word or phoneme across chunk boundaries.
+In our baseline, 10-minute chunks make this a rare event (only 5 cuts across a
+1-hour meeting).
+However, for production systems, the industry standard solution is:
+- Voice Activity Detection (VAD) / Silence-Aware Chunking: Using libraries like
+  `silero-vad` or `webrtcvad` to detect natural silence intervals (e.g., pauses
+  > 500ms) and slicing only at sentence boundaries.
+- Overlapping Chunk Windows: Adding a 1-2 second audio overlap between chunks
+  and deduplicating boundary tokens during text stitching."
+
+
+--------------------------------------------------------------------------------
+QUESTION 4: TOOLING & DEPENDENCY CHOICE
+Q: "Why use `yt-dlp` instead of `pytube` for YouTube downloads?"
+
+Interviewer is testing: Real-world engineering pragmatism vs. following
+   outdated tutorials.
+
+IDEAL ANSWER:
+"`pytube` is often unmaintained and breaks frequently whenever YouTube updates
+its player deciphering algorithms, causing persistent 403 Forbidden HTTP
+errors.
+`yt-dlp` is the industry-standard fork of youtube-dl. It is actively
+maintained, handles YouTube rate-limiting and throttling, and natively
+orchestrates FFmpeg postprocessors (`FFmpegExtractAudio`) to download and
+transcode audio streams directly into high-quality WAV in a single operation."
+
+
+--------------------------------------------------------------------------------
+QUESTION 5: SYSTEM PROFILING & BOTTLENECK ANALYSIS
+Q: "Where is the latency bottleneck in this whole project: audio extraction,
+   STT, or the LLM?"
+
+Interviewer is testing: System-level intuition and performance profiling.
+
+IDEAL ANSWER:
+"The dominant bottleneck is Speech-to-Text (Transcription).
+- Audio downloading and conversion: ~3 to 8 seconds.
+- Vector search (ChromaDB): < 20 milliseconds.
+- LLM Summarization (Mistral API): ~3 to 6 seconds.
+- Local Whisper inference on CPU: Roughly 0.8x to 1.5x real-time (a 10-minute
+  audio chunk takes 8-12 minutes on CPU).
+To optimize this in production:
+1. Run Whisper on GPU (CUDA / TensorRT).
+2. Use `faster-whisper` (CTranslate2 implementation), which provides a 4x
+  speedup with 50% lower VRAM footprint via 8-bit quantization."
+================================================================================

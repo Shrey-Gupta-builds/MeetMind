@@ -1,0 +1,77 @@
+================================================================================
+INTERVIEW PREPARATION: 08_STREAMLIT_APP.PY
+Component: Streamlit Web Dashboard & Conversational UI
+Role in Pipeline: Front-end visualization, step indicators, session state & chat
+                  UX
+================================================================================
+
+QUESTION 1: STREAMLIT EXECUTION MODEL & STATE RETENTION
+Q: "How does Streamlit's execution model work, and why is `st.session_state`
+   essential here?"
+
+Interviewer is testing: Understanding of reactive UI frameworks vs traditional
+   web servers.
+
+IDEAL ANSWER:
+"Streamlit runs from top to bottom on every user interaction (button click, text
+input change).
+Without state management, clicking 'Send' in the chat would re-run the entire
+script, wiping out the transcript, summary, and chat history.
+We use `st.session_state` to store:
+- `result`: Holds the meeting title, summary, action items, and compiled RAG
+  chain.
+- `chat_history`: Stores the list of previous user and assistant conversation
+  turns.
+- `pipeline_steps`: Tracks the live progress of each step (audio -> transcript
+  -> summary -> rag).
+Because `st.session_state` persists across script reruns, the user can chat
+interactively without re-triggering the expensive video transcription pipeline."
+
+
+--------------------------------------------------------------------------------
+QUESTION 2: USER EXPERIENCE (UX) & ASYNCHRONOUS FEEDBACK
+Q: "Processing a 20-minute video can take a few minutes. How did you prevent
+   the user from thinking the app froze?"
+
+Interviewer is testing: UX design for slow AI pipelines and visual feedback.
+
+IDEAL ANSWER:
+"1. Live Multi-Step Status Indicators: Instead of a generic spinner, we
+   implemented granular pipeline step tracking in the sidebar:
+   - Audio Processing (active ──► done)
+   - Transcription (active ──► done)
+   - Title Generation (active ──► done)
+   - Summarisation (active ──► done)
+   - Extraction (active ──► done)
+   - RAG Engine (active ──► done)
+2. Pulsing Glow CSS Animations: Active steps display a pulsing dot animation,
+   giving immediate real-time feedback on exactly which model is currently
+   executing.
+3. Spinners on Chat: When querying the RAG model, `st.spinner('Thinking…')`
+   provides micro-feedback during inference."
+
+
+--------------------------------------------------------------------------------
+QUESTION 3: PRODUCTION LIMITATIONS & NEXT-LEVEL ARCHITECTURE
+Q: "What are the limitations of Streamlit for production enterprise
+   applications, and what would you build instead?"
+
+Interviewer is testing: Real-world engineering maturity and frontend/backend
+   decoupling.
+
+IDEAL ANSWER:
+"While Streamlit is outstanding for rapid prototyping and internal ML demos, it
+has limitations in production:
+1. Concurrency Bottlenecks: Streamlit holds WebSocket connections and re-runs
+   Python code in a single process, making it difficult to scale to thousands
+   of concurrent users.
+2. Tight Coupling: Frontend presentation and backend AI logic run in the same
+   runtime.
+Production Architecture Upgrade:
+- Backend: FastAPI or Django REST Framework exposing asynchronous endpoints
+  (`/api/v1/analyze`, `/api/v1/chat`).
+- Task Queue: Celery + Redis to process video downloads and Whisper STT
+  asynchronously in the background.
+- Frontend: Next.js / React with TailwindCSS for a responsive, decoupled web
+  client using WebSockets or Server-Sent Events (SSE) for streaming responses."
+================================================================================

@@ -1,0 +1,93 @@
+# ── AI Video Assistant — .gitignore ──────────────────────────────────────────
+
+# ── Environment / Secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python bytecode & caches ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.Python
+
+# ── Downloaded / temporary audio & video files ────────────────────────────────
+downloades/
+downloads/
+audio/
+temp/
+tmp/
+*.wav
+*.mp3
+*.mp4
+*.m4a
+*.webm
+*.ogg
+*.flac
+
+# ── Vector / Chroma database files ────────────────────────────────────────────
+vector_db/
+chroma.sqlite3
+*.sqlite3
+
+# ── Whisper / HuggingFace model caches ────────────────────────────────────────
+.cache/
+*.pt
+*.bin
+*.onnx
+
+# ── Build / packaging artifacts ───────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.tox/
+.nox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# ── IDE / editor settings ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.spyderproject.db
+.spyproject/
+.ropeproject/
+
+# ── OS generated files ────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── Jupyter Notebooks (if any) ────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/

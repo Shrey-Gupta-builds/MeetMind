@@ -1,0 +1,377 @@
+# AI Video Assistant — In-Depth Analysis & Architecture Report
+
+================================================================================
+1. EXECUTIVE SUMMARY & WHAT THIS PROJECT IS ALL ABOUT
+================================================================================
+
+The "AI Video Assistant" (also named "AI Meeting Intelligence") is an end-to-end 
+multimodal application designed to transform spoken video/audio content (such as 
+recorded meetings, lectures, podcasts, or YouTube videos) into structured, 
+actionable business intelligence and an interactive knowledge base.
+
+Core Capabilities:
+1. Media Ingestion:
+   - Accepts YouTube URLs or local media files (MP4, MP3, WAV, MKV, etc.).
+   - Downloads and extracts audio using yt-dlp.
+   - Standardizes audio into mono 16 kHz WAV and splits into 10-minute chunks.
+
+2. Speech-to-Text (STT) & Translation:
+   - English: Uses OpenAI's Whisper model (runs locally on CPU/GPU via PyTorch).
+   - Hinglish / Hindi: Slices audio into 25-second segments and routes them 
+     to Sarvam AI's speech-to-text-translate API (Saaras v2.5), translating 
+     directly into English.
+
+3. Meeting Intelligence Extraction:
+   - Title Generation: Generates an executive title (max 8 words) via Mistral AI.
+   - Map-Reduce Summarization: Uses a map-reduce pipeline via LangChain LCEL 
+     to summarize long transcripts without exceeding context limits.
+   - Structured Extractions: Extracts Action Items (with task description, 
+     owner, and deadline), Key Decisions, and Open Questions / Follow-ups.
+
+4. Semantic Indexing & RAG (Retrieval-Augmented Generation):
+   - Chunks transcripts and embeds them into a local ChromaDB vector store 
+     using HuggingFace sentence-transformers (all-MiniLM-L6-v2).
+   - Provides a conversational Q&A system ("Chat with your meeting") grounded 
+     strictly in the meeting context to avoid hallucinations.
+
+5. Dual Frontends:
+   - CLI Interface: An interactive command-line terminal runner (main.py).
+   - Streamlit Web Dashboard: A dark-themed web app with progress tracking, 
+     cards, and live chat (app.py).
+
+
+================================================================================
+2. SYSTEM ARCHITECTURE & DATA FLOW
+================================================================================
+
+Visual Data Flow Pipeline:
+
+  [Input Source]
+  (YouTube URL or Local Media File)
+          │
+          ▼
+  [audio_processor.py]
+  ├── yt-dlp download (if URL)
+  ├── pydub + FFmpeg format conversion (16kHz, mono WAV)
+  └── 10-minute audio chunking
+          │
+          ▼
+  [transcriber.py]
+  ├── Language == "english"  --> Local OpenAI Whisper (small model)
+  └── Language == "hinglish" --> Sarvam AI API (<=25s slices -> English)
+          │
+          ▼ (Full Joined Transcript)
+          ├─────────────────────────────────────────────┐
+          │                                             │
+          ▼                                             ▼
+  [summarizer.py] & [extractor.py]              [vector_store.py]
+  ├── Title Generation                          ├── RecursiveTextSplitter
+  ├── Map-Reduce Bullet Summary                 ├── HuggingFace Embeddings
+  ├── Action Items (Task, Owner, Deadline)      └── ChromaDB Vector Store
+  ├── Key Decisions                                     │
+  └── Open Questions & Follow-ups                       ▼
+          │                                     [rag_engine.py]
+          │                                     ├── Top-4 Retrieval (k=4)
+          │                                     └── Mistral Q&A Chain
+          │                                             │
+          └──────────────────────┬──────────────────────┘
+                                 │
+                                 ▼
+                   [User Interfaces: CLI / Web UI]
+                   ├── main.py (Terminal REPL)
+                   └── app.py  (Streamlit Dashboard)
+
+
+================================================================================
+3. IN-DEPTH FILE-BY-FILE BREAKDOWN
+================================================================================
+
+--------------------------------------------------------------------------------
+File: Requirements.txt
+--------------------------------------------------------------------------------
+Purpose:
+  Specifies all Python package dependencies across the entire stack.
+
+Categories:
+  - Audio/Video Acquisition:
+    * yt-dlp (>=2024.4.9): Downloads audio streams from YouTube.
+    * pydub (>=0.25.1): Manipulates audio, converts channels/sample rate, splits chunks.
+    * ffmpeg-python (>=0.2.0): Python wrapper for system FFmpeg binaries.
+  - Speech-to-Text:
+    * openai-whisper (>=20231117): Runs local OpenAI Whisper models.
+    * torch (>=2.2.0), torchaudio (>=2.2.0): PyTorch neural net inference engine.
+  - Translation:
+    * deep-translator (>=1.11.4): Google Translate wrapper.
+    * requests (>=2.32.0): Used for HTTP calls to the Sarvam AI REST API.
+  - LLM Orchestration:
+    * langchain, langchain-core, langchain-community (>=0.2.0)
+    * langchain-mistralai (>=0.1.0), mistralai (>=0.4.0): Mistral integration.
+  - RAG & Vector Database:
+    * chromadb (>=0.5.0): Local embedded vector database.
+    * sentence-transformers (>=3.0.0): Local embedding models.
+    * langchain-huggingface (>=0.0.3): LangChain bridge for HuggingFace embeddings.
+    * tiktoken (>=0.7.0): Tokenizer helper for text splitting.
+  - Streamlit UI:
+    * streamlit (>=1.35.0), streamlit-extras (>=0.4.0), watchdog (>=4.0.0).
+  - Reporting & Utilities:
+    * reportlab, fpdf2: PDF report generators.
+    * python-dotenv: Loads secrets (.env).
+    * numpy, tqdm.
+
+--------------------------------------------------------------------------------
+File: audio_processor.py
+--------------------------------------------------------------------------------
+Purpose:
+  Prepares audio from raw user input so that it can be digested by STT models.
+
+Functions:
+  1. download_youtube_audio(url: str) -> str:
+     - Uses yt-dlp with `FFmpegExtractAudio` postprocessor.
+     - Downloads the highest-bitrate audio to `downloades/` folder as a 192kbps WAV.
+  2. convert_to_wav(input_path: str) -> str:
+     - Uses `pydub.AudioSegment.from_file(input_path)`.
+     - Resamples to 16,000 Hz, 1-channel mono (the standard format for Whisper/STT).
+     - Saves as `<name>_converted.wav`.
+  3. chunk_audio(wav_path: str, chunk_minutes: int = 10) -> list:
+     - Reads the WAV file and slices it into 10-minute pieces.
+     - Writes files named `<wav_path>_chunk_<i>.wav`.
+     - Prevents out-of-memory errors on long audio files.
+  4. process_input(source: str) -> list:
+     - Detects if the source is a web URL (http:// or https://) or a local file.
+     - Calls download_youtube_audio or convert_to_wav accordingly.
+     - Calls chunk_audio and returns the list of file paths.
+
+--------------------------------------------------------------------------------
+File: transcriber.py
+--------------------------------------------------------------------------------
+Purpose:
+  Transcribes audio chunks into text, with support for English and Hinglish/Hindi.
+
+Key Variables:
+  - WHISPER_MODEL: Default "small", overridable via environment variable.
+  - SARVAM_API_KEY: Subscription key for Sarvam AI.
+  - SARVAM_STT_TRANSLATE_URL: "https://api.sarvam.ai/speech-to-text-translate"
+  - SARVAM_MODEL: Default "saaras:v2.5".
+  - SARVAM_PIECE_SECONDS = 25 (safety margin under Sarvam's 30-second limit).
+
+Functions:
+  1. load_model():
+     - Lazy-loads the Whisper model into a module-level `_model` global singleton
+       so the model is only loaded into memory once.
+  2. transcribe_chunk_whisper(chunk_path: str) -> str:
+     - Runs `model.transcribe(chunk_path, task="transcribe")` and returns text.
+  3. _send_to_sarvam(piece_path: str) -> str:
+     - Sends a <= 25-second WAV piece as multipart/form-data with header 
+       `api-subscription-key`. Returns the translated English transcript.
+  4. transcribe_chunk_sarvam(chunk_path: str) -> str:
+     - Slices a 10-minute chunk into 25-second sub-pieces.
+     - Iterates and posts each piece to Sarvam AI.
+     - Cleans up temporary piece files in a `finally` block.
+  5. transcribe_chunk(chunk_path: str, language: str = "english") -> str:
+     - Routes to `transcribe_chunk_sarvam` if language == "hinglish", 
+       otherwise `transcribe_chunk_whisper`.
+  6. transcribe_all(chunks: list, language: str = "english") -> str:
+     - Processes every chunk in sequence, concatenates strings, and returns 
+       the full transcript.
+
+--------------------------------------------------------------------------------
+File: summarizer.py
+--------------------------------------------------------------------------------
+Purpose:
+  Produces meeting titles and summaries using Mistral AI via LangChain LCEL.
+
+Functions:
+  1. get_llm():
+     - Instantiates `ChatMistralAI(model="mistral-small-latest", temperature=0.3)`.
+  2. split_transcript(transcript: str) -> list:
+     - Uses `RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=200)`.
+  3. summarize(transcript: str) -> str:
+     - Implements a Map-Reduce architecture:
+       * Map: Summarizes each 3,000-character chunk independently.
+       * Combine: Combines chunk summaries and prompts the LLM:
+         "Combine these partial summaries into one final professional 
+          meeting summary in bullet points."
+  4. generate_title(transcript: str) -> str:
+     - Passes the first 2,000 characters of the transcript to Mistral:
+       "generate a short professional meeting title (max 8 words)."
+
+--------------------------------------------------------------------------------
+File: extractor.py
+--------------------------------------------------------------------------------
+Purpose:
+  Extracts specific structured meeting deliverables using LCEL chains.
+
+Functions:
+  1. get_llm():
+     - `ChatMistralAI(model="mistral-small-latest", temperature=0.2)`. 
+       Lower temperature (0.2) is chosen for factual extraction.
+  2. build_chain(system_prompt: str):
+     - Helper factory returning:
+       `RunnablePassthrough() | RunnableLambda(...) | ChatPromptTemplate | LLM | StrOutputParser()`
+  3. extract_action_items(transcript: str) -> str:
+     - Extracts items with: Task description, Owner, Deadline.
+  4. extract_key_decisions(transcript: str) -> str:
+     - Extracts all agreed-upon key decisions in a numbered list.
+  5. extract_questions(transcript: str) -> str:
+     - Extracts open questions, unresolved topics, or items needing follow-up.
+
+--------------------------------------------------------------------------------
+File: vector_store.py
+--------------------------------------------------------------------------------
+Purpose:
+  Manages text chunking, embedding generation, and ChromaDB vector persistence.
+
+Settings:
+  - CHROMA_DIR = "vector_db"
+  - COLLECTION_NAME = "meeting_transcript"
+  - EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+
+Functions:
+  1. get_embeddings():
+     - Returns `HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2", model_kwargs={"device": "cpu"})`.
+  2. build_vector_store(transcript: str) -> Chroma:
+     - Splits transcript into chunks of 500 characters with 50-character overlap.
+     - Wraps each chunk into a LangChain `Document(page_content=..., metadata={'chunk_index': i})`.
+     - Ingests into Chroma and persists locally to `./vector_db`.
+  3. load_vector_store() -> Chroma:
+     - Connects to an existing Chroma database on disk.
+  4. get_retriever(vector_store: Chroma, k: int = 4):
+     - Returns a similarity retriever returning top 4 relevant chunks.
+
+--------------------------------------------------------------------------------
+File: rag_engine.py
+--------------------------------------------------------------------------------
+Purpose:
+  Connects vector retrieval with Mistral AI for question answering.
+
+Functions:
+  1. format_docs(docs):
+     - Combines retrieved LangChain Document contents into a formatted context string.
+  2. build_rag_chain(transcript: str):
+     - Calls `build_vector_store(transcript)`.
+     - Assembles LCEL chain:
+       `{"context": retriever | RunnableLambda(format_docs), "question": RunnablePassthrough()}`
+       `| prompt | llm | StrOutputParser()`
+     - The prompt instructs the model to answer ONLY from context, and if not 
+       found, reply: "I could not find this information in the meeting transcript."
+  3. load_rag_chain():
+     - Loads an existing vector store from disk and builds the same chain.
+  4. ask_question(rag_chain, question: str) -> str:
+     - Invokes the RAG chain and returns the response string.
+
+--------------------------------------------------------------------------------
+File: main.py
+--------------------------------------------------------------------------------
+Purpose:
+  Terminal CLI runner for the application.
+
+Workflow:
+  1. Prompts user for YouTube URL or local file path.
+  2. Prompts user for language ("english" or "hinglish").
+  3. Executes `run_pipeline()`:
+     - audio_processor -> transcriber -> title -> summary -> extractions -> build_rag_chain.
+  4. Prints all deliverables to the terminal.
+  5. Starts an interactive REPL loop allowing the user to chat with the meeting.
+
+--------------------------------------------------------------------------------
+File: app.py
+--------------------------------------------------------------------------------
+Purpose:
+  Streamlit Web Application dashboard.
+
+Features:
+  1. Custom UI: Dark modern aesthetic with custom fonts (Syne & JetBrains Mono),
+     CSS cards, neon accents, and responsive layout.
+  2. Sidebar:
+     - Input field for URL or file path.
+     - Language selection (english / hinglish).
+     - Live progress step indicators (Audio, Transcription, Title, Summary, 
+       Extraction, RAG Engine).
+  3. Results Dashboard:
+     - Meeting Title banner.
+     - Summary card and collapsible full transcript viewer.
+     - 3-column grid for Action Items, Key Decisions, and Open Questions.
+     - Interactive Chat panel with conversational history and clear chat button.
+
+
+================================================================================
+4. KEY ENVIRONMENT VARIABLES & SETUP REQUIREMENTS
+================================================================================
+
+1. External System Dependency:
+   - FFmpeg: Must be installed and registered in your system PATH.
+     (Check with: `ffmpeg -version`)
+
+2. Environment Variables (.env file in workspace root):
+   - MISTRAL_API_KEY: Required for Mistral LLM (title, summary, extraction, RAG).
+   - SARVAM_API_KEY: Required only if selecting "hinglish" language mode.
+   - WHISPER_MODEL: (Optional, defaults to "small"). Options: tiny, base, small, medium, large.
+
+
+================================================================================
+5. CRITICAL BUGS & ARCHITECTURAL GOTCHAS FOUND IN CODEBASE
+================================================================================
+
+1. IMPORT PATH MISMATCH (CRITICAL):
+   In `main.py`, `app.py`, and `rag_engine.py`, the imports are written as:
+     from utils.audio_processor import process_input
+     from core.transcriber import transcribe_all
+     from core.summarizer import summarize, generate_title
+     from core.extractor import extract_action_items, extract_key_decisions, extract_questions
+     from core.rag_engine import build_rag_chain, ask_question
+     from core.vector_store import build_vector_store, load_vector_store, get_retriever
+
+   However, in this GitHub repository, all Python files are currently placed 
+   directly in the root directory! There are no `core` or `utils` subfolders.
+   Running `python main.py` or `streamlit run app.py` will fail with:
+     ModuleNotFoundError: No module named 'utils'
+
+   FIX:
+   Either:
+   A) Create folders `core/` and `utils/` with `__init__.py` files and move:
+      - `audio_processor.py` -> `utils/audio_processor.py`
+      - `transcriber.py`, `summarizer.py`, `extractor.py`, `vector_store.py`, 
+        `rag_engine.py` -> `core/`
+   OR
+   B) Change the import statements in `main.py`, `app.py`, and `rag_engine.py` 
+      to local imports (e.g. `import audio_processor`, `from transcriber import ...`).
+
+2. VECTOR STORE MULTI-SESSION OVERWRITING:
+   `vector_store.py` uses a single static directory `vector_db` and static 
+   collection name `meeting_transcript`. If you process Video A and then Video B, 
+   the vector database will retain chunks from both videos unless wiped, 
+   causing RAG answers to mix up content from different meetings.
+
+3. AUDIO CHUNK DISK RETENTION:
+   `audio_processor.py` generates 10-minute WAV chunk files on disk 
+   (`..._chunk_0.wav`) and downloads files into `downloades/`, but never deletes 
+   them after transcription finishes. Over time, this consumes significant disk storage.
+
+4. DEPENDENCY NAMING:
+   `vector_store.py` imports `from langchain_chroma import Chroma`.
+   In `Requirements.txt`, `chromadb` is listed, but `langchain-chroma` should 
+   also be installed explicitly:
+     pip install langchain-chroma
+
+
+================================================================================
+6. HOW TO RUN THE PROJECT
+================================================================================
+
+Step 1: Install Dependencies
+  pip install -r Requirements.txt
+  pip install langchain-chroma
+
+Step 2: Create .env File
+  Create a file named `.env` in the project root:
+    MISTRAL_API_KEY=your_mistral_api_key
+    SARVAM_API_KEY=your_sarvam_api_key
+
+Step 3: Resolve Imports (see Section 5, Issue 1)
+
+Step 4: Run via Terminal CLI
+  python main.py
+
+Step 5: Run via Web Dashboard
+  streamlit run app.py
+================================================================================
