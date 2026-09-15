@@ -11,7 +11,7 @@ load_dotenv()
 
 # ─── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="AI Video Assistant",
+    page_title="MeetMind",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -331,7 +331,7 @@ def render_step_bar(label: str, key: str, icon: str):
 
 # ─── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div class="hero-title" style="font-size:1.6rem">🎬 AI<br>Video</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-title" style="font-size:1.6rem">🧠 Meet<br>Mind</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-sub">Meeting Intelligence</div>', unsafe_allow_html=True)
     st.markdown("---")
 
@@ -356,7 +356,7 @@ with st.sidebar:
             render_step_bar(label, step, icon)
 
 # ─── Main Area ──────────────────────────────────────────────────────────────────
-st.markdown('<div class="hero-title">AI Video Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">MeetMind</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-sub">Transcribe · Summarise · Chat with your meetings</div>', unsafe_allow_html=True)
 st.markdown("---")
 
